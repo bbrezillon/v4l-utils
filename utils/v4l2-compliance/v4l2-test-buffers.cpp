@@ -211,10 +211,10 @@ static bool fill_output_buffer(const cv4l_queue &q, cv4l_buffer &buf, bool first
 
 class buffer : public cv4l_buffer {
 public:
-	buffer(unsigned type = 0, unsigned memory = 0, unsigned index = 0) :
-		cv4l_buffer(type, memory, index) {}
-	buffer(const cv4l_queue &q, unsigned index = 0) :
-		cv4l_buffer(q, index) {}
+	buffer(unsigned type = 0, unsigned memory = 0, unsigned index = 0, bool extapi = false) :
+		cv4l_buffer(type, memory, index, extapi) {}
+	buffer(const cv4l_queue &q, unsigned index = 0, bool extapi = false) :
+		cv4l_buffer(q, index, extapi) {}
 	buffer(const cv4l_buffer &b) : cv4l_buffer(b) {}
 
 	int querybuf(node *node, unsigned index)
@@ -359,7 +359,7 @@ int buffer::check(unsigned type, unsigned memory, unsigned index,
 	fail_on_test(g_memory() != memory);
 	fail_on_test(g_index() >= VIDEO_MAX_FRAME);
 	fail_on_test(g_index() != index);
-	fail_on_test(buf.reserved2);
+	fail_on_test(!isextbuf && buf.reserved2);
 	if (g_flags() & V4L2_BUF_FLAG_REQUEST_FD)
 		fail_on_test(g_request_fd() < 0);
 	else
@@ -391,15 +391,15 @@ int buffer::check(unsigned type, unsigned memory, unsigned index,
 			buf_states++;
 	}
 	fail_on_test(buf_states > 1);
-	fail_on_test(buf.length == 0);
-	if (v4l_type_is_planar(g_type())) {
-		fail_on_test(buf.length > VIDEO_MAX_PLANES);
-		for (unsigned p = 0; p < buf.length; p++) {
+	fail_on_test(g_num_planes() == 0);
+	fail_on_test(g_num_planes() > VIDEO_MAX_PLANES);
+	for (unsigned p = 0; p < g_num_planes(); p++) {
+		if (!isextbuf && v4l_type_is_planar(type)) {
 			struct v4l2_plane *vp = buf.m.planes + p;
-
 			fail_on_test(check_0(vp->reserved, sizeof(vp->reserved)));
-			fail_on_test(vp->length == 0);
 		}
+
+		fail_on_test(g_length(p) == 0);
 	}
 
 	if (v4l_type_is_capture(g_type()) && !ts_copy && !is_vivid &&
@@ -526,9 +526,8 @@ static int testCanSetSameTimings(struct node *node)
 	return 0;
 }
 
-int testReqBufs(struct node *node)
+int testReqBufs(struct node *node, bool extapi)
 {
-	struct v4l2_create_buffers crbufs = { };
 	struct v4l2_requestbuffers reqbufs = { };
 	bool can_stream = node->g_caps() & V4L2_CAP_STREAMING;
 	bool can_rw = node->g_caps() & V4L2_CAP_READWRITE;
@@ -686,13 +685,29 @@ int testReqBufs(struct node *node)
 			if (!node->is_m2m)
 				fail_on_test(q2.create_bufs(node->node2, 1) != EBUSY);
 
-			memset(&crbufs, 0xff, sizeof(crbufs));
-			node->g_fmt(crbufs.format, i);
-			crbufs.count = 0;
-			crbufs.memory = m;
-			fail_on_test(doioctl(node, VIDIOC_CREATE_BUFS, &crbufs));
-			fail_on_test(check_0(crbufs.reserved, sizeof(crbufs.reserved)));
-			fail_on_test(crbufs.index != q.g_buffers());
+			if (extapi) {
+				struct v4l2_ext_create_buffers crbufs = { };
+
+				memset(&crbufs, 0xff, sizeof(crbufs));
+				node->g_ext_fmt(crbufs.format, i);
+				crbufs.count = 0;
+				crbufs.memory = m;
+				ret = doioctl(node, VIDIOC_EXT_CREATE_BUFS, &crbufs);
+				if (ret == ENOTTY)
+					return ret;
+				fail_on_test(ret);
+				fail_on_test(crbufs.index != q.g_buffers());
+			} else {
+				struct v4l2_create_buffers crbufs = { };
+
+				memset(&crbufs, 0xff, sizeof(crbufs));
+				node->g_fmt(crbufs.format, i);
+				crbufs.count = 0;
+				crbufs.memory = m;
+				fail_on_test(doioctl(node, VIDIOC_CREATE_BUFS, &crbufs));
+				fail_on_test(check_0(crbufs.reserved, sizeof(crbufs.reserved)));
+				fail_on_test(crbufs.index != q.g_buffers());
+			}
 
 			if (node->is_video) {
 				cv4l_fmt fmt;
@@ -719,10 +734,10 @@ int testReqBufs(struct node *node)
 	return 0;
 }
 
-int testExpBuf(struct node *node)
+int testExpBuf(struct node *node, bool extapi)
 {
 	bool have_expbuf = false;
-	int type;
+	int type, ret;
 
 	for (type = 0; type <= V4L2_BUF_TYPE_LAST; type++) {
 		if (!(node->valid_buftypes & (1 << type)))
@@ -746,7 +761,14 @@ int testExpBuf(struct node *node)
 
 		fail_on_test(q.reqbufs(node, 2));
 		if (q.has_expbuf(node)) {
-			fail_on_test(q.export_bufs(node, q.g_type()));
+			if (extapi) {
+				ret = q.export_bufs(node, q.g_type());
+				if (ret == ENOTTY)
+					return ret;
+			} else {
+				ret = q.export_bufs(node, q.g_type());
+			}
+			fail_on_test(ret);
 			have_expbuf = true;
 		} else {
 			fail_on_test(!q.export_bufs(node, q.g_type()));

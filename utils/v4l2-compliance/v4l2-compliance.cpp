@@ -1280,11 +1280,13 @@ void testNode(struct node &node, struct node &expbuf_node, media_type type,
 		/* Buffer ioctls */
 
 		printf("Buffer ioctls%s:\n", suffix);
-		printf("\ttest VIDIOC_REQBUFS/CREATE_BUFS/QUERYBUF: %s\n", ok(testReqBufs(&node)));
+		printf("\ttest VIDIOC_REQBUFS/CREATE_BUFS/QUERYBUF: %s\n", ok(testReqBufs(&node, false)));
+		printf("\ttest VIDIOC_REQBUFS/EXT_CREATE_BUFS/EXT_QUERYBUF: %s\n", ok(testReqBufs(&node, true)));
 		// Reopen after each streaming test to reset the streaming state
 		// in case of any errors in the preceeding test.
 		node.reopen();
-		printf("\ttest VIDIOC_EXPBUF: %s\n", ok(testExpBuf(&node)));
+		printf("\ttest VIDIOC_EXPBUF: %s\n", ok(testExpBuf(&node, false)));
+		printf("\ttest VIDIOC_EXT_EXPBUF: %s\n", ok(testExpBuf(&node, true)));
 		if (node.can_capture)
 			node.set_interval(min_period);
 		printf("\ttest Requests: %s\n", ok(testRequests(&node, options[OptStreaming])));

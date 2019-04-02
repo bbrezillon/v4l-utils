@@ -327,9 +327,9 @@ int testSubDevSelection(struct node *node, unsigned which, unsigned pad);
 int testSubDevFrameInterval(struct node *node, unsigned pad);
 
 // Buffer ioctl tests
-int testReqBufs(struct node *node);
+int testReqBufs(struct node *node, bool extapi);
 int testReadWrite(struct node *node);
-int testExpBuf(struct node *node);
+int testExpBuf(struct node *node, bool extapi);
 int testBlockingWait(struct node *node);
 int testMmap(struct node *node, unsigned frame_count, enum poll_mode pollmode);
 int testUserPtr(struct node *node, unsigned frame_count, enum poll_mode pollmode);

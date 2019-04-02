@@ -1212,6 +1212,7 @@ void testNode(struct node &node, struct node &expbuf_node, media_type type,
 		node.frmsizes_count.clear();
 		node.has_frmintervals = false;
 		node.valid_buftypes = 0;
+		node.valid_extbuftypes = 0;
 		node.valid_memorytype = 0;
 		node.buf_caps = 0;
 		for (unsigned idx = 0; idx < V4L2_BUF_TYPE_LAST + 1; idx++)
@@ -1257,8 +1258,11 @@ void testNode(struct node &node, struct node &expbuf_node, media_type type,
 		printf("\ttest VIDIOC_G/S_PARM: %s\n", ok(testParm(&node)));
 		printf("\ttest VIDIOC_G_FBUF: %s\n", ok(testFBuf(&node)));
 		printf("\ttest VIDIOC_G_FMT: %s\n", ok(testGetFormats(&node)));
+		printf("\ttest VIDIOC_G_EXT_FMT: %s\n", ok(testGetExtFormats(&node)));
 		printf("\ttest VIDIOC_TRY_FMT: %s\n", ok(testTryFormats(&node)));
+		printf("\ttest VIDIOC_TRY_EXT_FMT: %s\n", ok(testTryExtFormats(&node)));
 		printf("\ttest VIDIOC_S_FMT: %s\n", ok(testSetFormats(&node)));
+		printf("\ttest VIDIOC_S_EXT_FMT: %s\n", ok(testSetExtFormats(&node)));
 		printf("\ttest VIDIOC_G_SLICED_VBI_CAP: %s\n", ok(testSlicedVBICap(&node)));
 		printf("\ttest Cropping: %s\n", ok(testCropping(&node)));
 		printf("\ttest Composing: %s\n", ok(testComposing(&node)));

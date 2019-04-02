@@ -404,6 +404,13 @@ static void createInvalidFmt(struct v4l2_format &fmt, struct v4l2_clip &clip, un
 	}
 }
 
+static void createInvalidExtFmt(struct v4l2_ext_format &fmt, unsigned type)
+{
+	memset(&fmt, 0xff, sizeof(fmt));
+	fmt.type = type;
+	fmt.fmt.pix.field = V4L2_FIELD_ANY;
+}
+
 static int testFormatsType(struct node *node, int ret,  unsigned type, struct v4l2_format &fmt, bool have_clip = false)
 {
 	pixfmt_map &map = node->buftype_pixfmts[type];
@@ -615,6 +622,176 @@ int testGetFormats(struct node *node)
 	return supported ? 0 : ENOTTY;
 }
 
+static int testExtFormatsType(struct node *node, int ret,  unsigned type,
+			      struct v4l2_ext_format &fmt, bool have_clip = false)
+{
+	pixfmt_map &map = node->buftype_pixfmts[type];
+	pixfmt_map *map_splane;
+	struct v4l2_ext_pix_format &pix = fmt.fmt.pix;
+	struct v4l2_vbi_format &vbi = fmt.fmt.vbi;
+	struct v4l2_sliced_vbi_format &sliced = fmt.fmt.sliced;
+	struct v4l2_sdr_format &sdr = fmt.fmt.sdr;
+	struct v4l2_meta_format &meta = fmt.fmt.meta;
+	unsigned min_data_samples;
+	unsigned min_sampling_rate;
+	v4l2_std_id std;
+	__u32 service_set = 0;
+	unsigned tot_bytesperline = 0;
+	unsigned cnt = 0;
+
+
+	if (ret == ENOTTY)
+		return ret;
+	if (ret == EINVAL)
+		return ENOTTY;
+	if (ret)
+		return fail("expected EINVAL, but got %d when getting format for buftype %d\n", ret, type);
+	fail_on_test(fmt.type != type);
+	fail_on_test(type == V4L2_BUF_TYPE_VIDEO_OUTPUT_OVERLAY ||
+		     type == V4L2_BUF_TYPE_VIDEO_OVERLAY ||
+		     type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE ||
+		     type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
+
+	switch (type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fail_on_test(!pix.width || !pix.height);
+		map_splane = &node->buftype_pixfmts[type - 8];
+		if (map.find(pix.pixelformat) == map.end() &&
+		    map_splane->find(pix.pixelformat) == map_splane->end())
+			return fail("pixelformat %08x (%s) for buftype %d not reported by ENUM_FMT\n",
+					pix.pixelformat, fcc2s(pix.pixelformat).c_str(), type);
+		if (!node->is_m2m)
+			fail_on_test(testColorspace(node->has_inputs || node->has_outputs,
+						    pix.pixelformat, pix.colorspace,
+						    pix.ycbcr_enc, pix.quantization));
+		fail_on_test(pix.field == V4L2_FIELD_ANY);
+		fail_on_test(pix.num_planes == 0 || pix.num_planes >= VIDEO_MAX_PLANES);
+		for (unsigned int i = 0; i < pix.num_planes; i++) {
+			struct v4l2_plane_ext_pix_format &pfmt = pix.plane_fmt[i];
+
+			fail_on_test(!pfmt.sizeimage);
+			tot_bytesperline += pfmt.bytesperline;
+		}
+		fail_on_test(tot_bytesperline && tot_bytesperline < pix.width);
+		break;
+	case V4L2_BUF_TYPE_VBI_CAPTURE:
+	case V4L2_BUF_TYPE_VBI_OUTPUT:
+		// Currently VBI assumes that you have G_STD as well.
+		fail_on_test(doioctl(node, VIDIOC_G_STD, &std));
+		if (std & V4L2_STD_625_50) {
+			min_sampling_rate = 6937500;
+			// the number of databits for PAL teletext is 18 (clock run in) +
+			// 6 (framing code) + 42 * 8 (data).
+			min_data_samples = (vbi.sampling_rate * (18 + 6 + 42 * 8)) / min_sampling_rate;
+		} else {
+			min_sampling_rate = 5727272;
+			// the number of databits for NTSC teletext is 18 (clock run in) +
+			// 6 (framing code) + 34 * 8 (data).
+			min_data_samples = (vbi.sampling_rate * (18 + 6 + 34 * 8)) / min_sampling_rate;
+		}
+		fail_on_test(vbi.sampling_rate < min_sampling_rate);
+		fail_on_test(!vbi.samples_per_line);
+		fail_on_test(vbi.sample_format != V4L2_PIX_FMT_GREY);
+		fail_on_test(vbi.offset > vbi.samples_per_line);
+		ret = check_0(vbi.reserved, sizeof(vbi.reserved));
+		if (ret)
+			return fail("vbi.reserved not zeroed\n");
+		// Check that offset leaves enough room for the maximum required
+		// amount of data.
+		fail_on_test(min_data_samples > vbi.samples_per_line - vbi.offset);
+		fail_on_test(!vbi.count[0] || !vbi.count[1]);
+		fail_on_test(vbi.flags & ~(V4L2_VBI_UNSYNC | V4L2_VBI_INTERLACED));
+		if (vbi.flags & V4L2_VBI_INTERLACED)
+			fail_on_test(vbi.count[0] != vbi.count[1]);
+		break;
+	case V4L2_BUF_TYPE_SLICED_VBI_CAPTURE:
+	case V4L2_BUF_TYPE_SLICED_VBI_OUTPUT:
+		ret = check_0(sliced.reserved, sizeof(sliced.reserved));
+		if (ret)
+			return fail("sliced.reserved not zeroed\n");
+		fail_on_test(sliced.service_lines[0][0] || sliced.service_lines[1][0]);
+		for (int f = 0; f < 2; f++) {
+			for (int i = 0; i < 24; i++) {
+				if (sliced.service_lines[f][i])
+					cnt++;
+				service_set |= sliced.service_lines[f][i];
+			}
+		}
+		fail_on_test(sliced.io_size < sizeof(struct v4l2_sliced_vbi_data) * cnt);
+		fail_on_test(sliced.service_set != service_set);
+		break;
+	case V4L2_BUF_TYPE_SDR_CAPTURE:
+	case V4L2_BUF_TYPE_SDR_OUTPUT:
+		if (map.find(sdr.pixelformat) == map.end())
+			return fail("pixelformat %08x (%s) for buftype %d not reported by ENUM_FMT\n",
+					sdr.pixelformat, fcc2s(sdr.pixelformat).c_str(), type);
+		fail_on_test(sdr.buffersize == 0);
+		fail_on_test(check_0(sdr.reserved, sizeof(sdr.reserved)));
+		break;
+	case V4L2_BUF_TYPE_META_CAPTURE:
+	case V4L2_BUF_TYPE_META_OUTPUT:
+		if (map.find(meta.dataformat) == map.end())
+			return fail("dataformat %08x (%s) for buftype %d not reported by ENUM_FMT\n",
+					meta.dataformat, fcc2s(meta.dataformat).c_str(), type);
+		fail_on_test(meta.buffersize == 0);
+		break;
+	case V4L2_BUF_TYPE_PRIVATE:
+		break;
+	}
+	return 0;
+}
+
+int testGetExtFormats(struct node *node)
+{
+	struct v4l2_ext_format fmt;
+	bool supported = false;
+	int type;
+	int ret;
+
+	for (type = 0; type <= V4L2_BUF_TYPE_LAST; type++) {
+		createInvalidExtFmt(fmt, type);
+		ret = doioctl(node, VIDIOC_G_EXT_FMT, &fmt);
+		if (ret == ENOTTY)
+			return ret;
+
+		ret = testExtFormatsType(node, ret, type, fmt);
+
+		if (ret && ret != ENOTTY)
+			return ret;
+		if (!ret) {
+			supported = true;
+			node->valid_extbuftypes |= 1 << type;
+		}
+		switch (type) {
+		case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+		case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		case V4L2_BUF_TYPE_SDR_CAPTURE:
+		case V4L2_BUF_TYPE_SDR_OUTPUT:
+		case V4L2_BUF_TYPE_META_CAPTURE:
+		case V4L2_BUF_TYPE_META_OUTPUT:
+			if (ret && (node->g_caps() & buftype2cap[type]) &&
+			    !(node->valid_buftypes & (1 << type)))
+				return fail("%s cap set, but no %s formats defined\n",
+					buftype2s(type).c_str(), buftype2s(type).c_str());
+			if (!ret && !(node->g_caps() & buftype2cap[type]))
+				return fail("%s cap not set, but %s formats defined\n",
+					buftype2s(type).c_str(), buftype2s(type).c_str());
+			break;
+		default:
+			/* ENUMFMT doesn't support other buftypes */
+			break;
+		}
+	}
+
+	memset(&fmt, 0, sizeof(fmt));
+	fmt.type = V4L2_BUF_TYPE_PRIVATE;
+	ret = doioctl(node, VIDIOC_G_EXT_FMT, &fmt);
+	if (ret != ENOTTY && ret != EINVAL)
+		return fail("Buffer type PRIVATE allowed!\n");
+	return supported ? 0 : ENOTTY;
+}
+
 static bool matchFormats(const struct v4l2_format &f1, const struct v4l2_format &f2)
 {
 	const struct v4l2_pix_format &pix1 = f1.fmt.pix;
@@ -646,6 +823,31 @@ static bool matchFormats(const struct v4l2_format &f1, const struct v4l2_format 
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		return !memcmp(&f1.fmt.pix_mp, &f2.fmt.pix_mp, sizeof(f1.fmt.pix_mp));
+	case V4L2_BUF_TYPE_SDR_CAPTURE:
+	case V4L2_BUF_TYPE_SDR_OUTPUT:
+		return !memcmp(&f1.fmt.sdr, &f2.fmt.sdr, sizeof(f1.fmt.sdr));
+	case V4L2_BUF_TYPE_META_CAPTURE:
+	case V4L2_BUF_TYPE_META_OUTPUT:
+		return !memcmp(&f1.fmt.meta, &f2.fmt.meta, sizeof(f1.fmt.meta));
+
+	}
+	return false;
+}
+
+static bool matchExtFormats(const struct v4l2_ext_format &f1, const struct v4l2_ext_format &f2)
+{
+	if (f1.type != f2.type)
+		return false;
+	switch (f1.type) {
+	case V4L2_BUF_TYPE_VBI_CAPTURE:
+	case V4L2_BUF_TYPE_VBI_OUTPUT:
+		return !memcmp(&f1.fmt.vbi, &f2.fmt.vbi, sizeof(f1.fmt.vbi));
+	case V4L2_BUF_TYPE_SLICED_VBI_CAPTURE:
+	case V4L2_BUF_TYPE_SLICED_VBI_OUTPUT:
+		return !memcmp(&f1.fmt.sliced, &f2.fmt.sliced, sizeof(f1.fmt.sliced));
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return !memcmp(&f1.fmt.pix, &f2.fmt.pix, sizeof(f1.fmt.pix));
 	case V4L2_BUF_TYPE_SDR_CAPTURE:
 	case V4L2_BUF_TYPE_SDR_OUTPUT:
 		return !memcmp(&f1.fmt.sdr, &f2.fmt.sdr, sizeof(f1.fmt.sdr));
@@ -769,6 +971,111 @@ int testTryFormats(struct node *node)
 	if (ret != ENOTTY && ret != EINVAL)
 		return fail("Buffer type PRIVATE allowed!\n");
 	return node->valid_buftypes ? result : ENOTTY;
+}
+
+int testTryExtFormats(struct node *node)
+{
+	struct v4l2_ext_format fmt, fmt_try;
+	int result = 0;
+	int type;
+	int ret;
+
+	for (type = 0; type <= V4L2_BUF_TYPE_LAST; type++) {
+		if (!(node->valid_extbuftypes & (1 << type)))
+			continue;
+
+		switch (type) {
+		case V4L2_BUF_TYPE_VBI_CAPTURE:
+		case V4L2_BUF_TYPE_VBI_OUTPUT:
+		case V4L2_BUF_TYPE_SLICED_VBI_CAPTURE:
+		case V4L2_BUF_TYPE_SLICED_VBI_OUTPUT:
+			if (!(node->cur_io_caps & V4L2_IN_CAP_STD))
+				continue;
+			break;
+		}
+
+		createInvalidExtFmt(fmt, type);
+		doioctl(node, VIDIOC_G_EXT_FMT, &fmt);
+		fmt_try = fmt;
+		ret = doioctl(node, VIDIOC_TRY_EXT_FMT, &fmt_try);
+		if (ret)
+			return fail("%s is valid, but no TRY_EXT_FMT was implemented\n",
+					buftype2s(type).c_str());
+		ret = testExtFormatsType(node, ret, type, fmt_try);
+		if (ret)
+			return ret;
+		if (!matchExtFormats(fmt, fmt_try))
+			result = fail("%s: TRY_FMT(G_FMT) != G_FMT\n",
+					buftype2s(type).c_str());
+	}
+
+	for (type = 0; type <= V4L2_BUF_TYPE_LAST; type++) {
+		if (!(node->valid_extbuftypes & (1 << type)))
+			continue;
+
+		switch (type) {
+		case V4L2_BUF_TYPE_VBI_CAPTURE:
+		case V4L2_BUF_TYPE_VBI_OUTPUT:
+		case V4L2_BUF_TYPE_SLICED_VBI_CAPTURE:
+		case V4L2_BUF_TYPE_SLICED_VBI_OUTPUT:
+			if (!(node->cur_io_caps & V4L2_IN_CAP_STD))
+				continue;
+			break;
+		}
+
+		createInvalidExtFmt(fmt, type);
+		ret = doioctl(node, VIDIOC_TRY_EXT_FMT, &fmt);
+		if (ret == EINVAL) {
+			__u32 pixelformat;
+
+			/* In case of failure obtain a valid pixelformat and insert
+			 * that in the next attempt to call TRY_FMT. */
+			doioctl(node, VIDIOC_G_FMT, &fmt);
+
+			switch (type) {
+			case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+			case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+				pixelformat = fmt.fmt.pix.pixelformat;
+				break;
+			case V4L2_BUF_TYPE_SDR_CAPTURE:
+			case V4L2_BUF_TYPE_SDR_OUTPUT:
+				pixelformat = fmt.fmt.sdr.pixelformat;
+				break;
+			case V4L2_BUF_TYPE_META_CAPTURE:
+			case V4L2_BUF_TYPE_META_OUTPUT:
+				pixelformat = fmt.fmt.meta.dataformat;
+				break;
+			default:
+				/* for other formats returning EINVAL is certainly wrong */
+				return fail("TRY_FMT cannot handle an invalid format\n");
+			}
+			warn_once("TRY_FMT cannot handle an invalid pixelformat.\n");
+			warn_once("This may or may not be a problem. For more information see:\n");
+			warn_once("http://www.mail-archive.com/linux-media@vger.kernel.org/msg56550.html\n");
+
+			/* Now try again, but pass a valid pixelformat. */
+			createInvalidExtFmt(fmt, type);
+			if (node->is_sdr)
+				fmt.fmt.sdr.pixelformat = pixelformat;
+			else if (node->is_meta)
+				fmt.fmt.meta.dataformat = pixelformat;
+			else
+				fmt.fmt.pix.pixelformat = pixelformat;
+			ret = doioctl(node, VIDIOC_TRY_EXT_FMT, &fmt);
+			if (ret == EINVAL)
+				return fail("TRY_EXT_FMT cannot handle an invalid format\n");
+		}
+		ret = testExtFormatsType(node, ret, type, fmt, true);
+		if (ret)
+			return ret;
+	}
+
+	memset(&fmt, 0, sizeof(fmt));
+	fmt.type = V4L2_BUF_TYPE_PRIVATE;
+	ret = doioctl(node, VIDIOC_TRY_EXT_FMT, &fmt);
+	if (ret != ENOTTY && ret != EINVAL)
+		return fail("Buffer type PRIVATE allowed!\n");
+	return node->valid_extbuftypes ? result : ENOTTY;
 }
 
 static int testM2MFormats(struct node *node)
@@ -1082,6 +1389,129 @@ int testSetFormats(struct node *node)
 			continue;
 
 		doioctl(node, VIDIOC_S_FMT, &initial_fmts[type]);
+	}
+	return 0;
+}
+
+int testSetExtFormats(struct node *node)
+{
+	struct v4l2_ext_format fmt, fmt_set;
+	struct v4l2_ext_format initial_fmts[V4L2_BUF_TYPE_LAST + 1];
+	int type;
+	int ret;
+
+	for (type = 0; type <= V4L2_BUF_TYPE_LAST; type++) {
+		if (!(node->valid_extbuftypes & (1 << type)))
+			continue;
+
+		createInvalidExtFmt(fmt, type);
+		doioctl(node, VIDIOC_G_EXT_FMT, &fmt);
+
+		initial_fmts[type] = fmt;
+		createInvalidExtFmt(fmt_set, type);
+		ret = doioctl(node, VIDIOC_S_EXT_FMT, &fmt_set);
+		if (ret == EINVAL) {
+			__u32 pixelformat;
+
+			/* In case of failure obtain a valid pixelformat and insert
+			 * that in the next attempt to call TRY_FMT. */
+			doioctl(node, VIDIOC_G_EXT_FMT, &fmt_set);
+
+			switch (type) {
+			case V4L2_BUF_TYPE_META_CAPTURE:
+			case V4L2_BUF_TYPE_META_OUTPUT:
+				pixelformat = fmt_set.fmt.meta.dataformat;
+				break;
+			case V4L2_BUF_TYPE_SDR_CAPTURE:
+			case V4L2_BUF_TYPE_SDR_OUTPUT:
+				pixelformat = fmt_set.fmt.sdr.pixelformat;
+				break;
+			case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+			case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+				pixelformat = fmt_set.fmt.pix.pixelformat;
+				break;
+			case V4L2_BUF_TYPE_VBI_CAPTURE:
+			case V4L2_BUF_TYPE_VBI_OUTPUT:
+			case V4L2_BUF_TYPE_SLICED_VBI_CAPTURE:
+			case V4L2_BUF_TYPE_SLICED_VBI_OUTPUT:
+				continue;
+			default:
+				/* for other formats returning EINVAL is certainly wrong */
+				return fail("S_EXT_FMT cannot handle an invalid format\n");
+			}
+			warn_once("S_EXT_FMT cannot handle an invalid pixelformat.\n");
+			warn_once("This may or may not be a problem. For more information see:\n");
+			warn_once("http://www.mail-archive.com/linux-media@vger.kernel.org/msg56550.html\n");
+
+			/* Now try again, but pass a valid pixelformat. */
+			createInvalidExtFmt(fmt_set, type);
+			if (node->is_sdr)
+				fmt_set.fmt.sdr.pixelformat = pixelformat;
+			else if (node->is_meta)
+				fmt_set.fmt.meta.dataformat = pixelformat;
+			else
+				fmt_set.fmt.pix.pixelformat = pixelformat;
+			ret = doioctl(node, VIDIOC_S_EXT_FMT, &fmt_set);
+			if (ret == EINVAL)
+				return fail("S_EXT_FMT cannot handle an invalid format\n");
+		}
+		ret = testExtFormatsType(node, ret, type, fmt_set, true);
+		if (ret)
+			return ret;
+
+		fmt_set = fmt;
+		ret = doioctl(node, VIDIOC_S_EXT_FMT, &fmt_set);
+		ret = testExtFormatsType(node, ret, type, fmt_set);
+		if (ret)
+			return ret;
+		if (!matchExtFormats(fmt, fmt_set))
+			return fail("%s: S_EXT_FMT(G_EXT_FMT) != G_EXT_FMT\n",
+					buftype2s(type).c_str());
+	}
+	memset(&fmt, 0, sizeof(fmt));
+	fmt.type = V4L2_BUF_TYPE_PRIVATE;
+	ret = doioctl(node, VIDIOC_S_FMT, &fmt);
+	if (ret != ENOTTY && ret != EINVAL)
+		return fail("Buffer type PRIVATE allowed!\n");
+	if (!node->valid_extbuftypes)
+		return ENOTTY;
+
+	// Test if setting a format on one fh will set the format for all
+	// filehandles.
+	if (node->node2 == NULL)
+		return 0;
+
+	// m2m devices are special in that the format is often per-filehandle.
+	// But colorspace information should be passed from output to capture,
+	// so test that.
+	if (node->is_m2m)
+		return testM2MFormats(node);
+
+	for (type = 0; type <= V4L2_BUF_TYPE_LAST; type++) {
+		switch (type) {
+		case V4L2_BUF_TYPE_SDR_CAPTURE:
+		case V4L2_BUF_TYPE_SDR_OUTPUT:
+		case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+		case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+			if (!(node->valid_extbuftypes & (1 << type)))
+				continue;
+
+			ret = testGlobalFormat(node, type);
+			if (ret)
+				return ret;
+			break;
+
+		default:
+			break;
+		}
+	}
+
+	/* Restore initial format */
+	for (type = 0; type <= V4L2_BUF_TYPE_LAST; type++) {
+		if (!(node->valid_extbuftypes & (1 << type)))
+			continue;
+
+		doioctl(node, VIDIOC_S_EXT_FMT, &initial_fmts[type]);
 	}
 	return 0;
 }

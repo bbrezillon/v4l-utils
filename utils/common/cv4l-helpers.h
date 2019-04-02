@@ -767,6 +767,8 @@ public:
 	void *g_dataptr(unsigned index, unsigned plane) const { return v4l_queue_g_dataptr(this, index, plane); }
 	int g_fd(unsigned index, unsigned plane) const { return v4l_queue_g_fd(this, index, plane); }
 	void s_fd(unsigned index, unsigned plane, int fd) { v4l_queue_s_fd(this, index, plane, fd); }
+	void g_dmabuf(unsigned index, unsigned plane, struct v4l_dmabuf& dbuf) const { v4l_queue_g_dmabuf(this, index, plane, &dbuf); }
+	void s_dmabuf(unsigned index, unsigned plane, const struct v4l_dmabuf& dbuf) { v4l_queue_s_dmabuf(this, index, plane, &dbuf); }
 
 	int reqbufs(cv4l_fd *fd, unsigned count = 0)
 	{
@@ -775,6 +777,10 @@ public:
 	bool has_create_bufs(cv4l_fd *fd) const
 	{
 		return v4l_queue_has_create_bufs(fd->g_v4l_fd(), this);
+	}
+	bool has_ext_create_bufs(cv4l_fd *fd) const
+	{
+		return v4l_queue_has_ext_create_bufs(fd->g_v4l_fd(), this);
 	}
 	int create_bufs(cv4l_fd *fd, unsigned count, const v4l2_format *fmt = NULL)
 	{
@@ -812,6 +818,10 @@ public:
 	{
 		return v4l_queue_export_bufs(fd->g_v4l_fd(), this, exp_type);
 	}
+	int ext_export_bufs(cv4l_fd *fd, unsigned exp_type)
+	{
+		return v4l_queue_ext_export_bufs(fd->g_v4l_fd(), this, exp_type);
+	}
 	void close_exported_fds()
 	{
 		v4l_queue_close_exported_fds(this);
@@ -820,9 +830,9 @@ public:
 	{
 		v4l_queue_free(fd->g_v4l_fd(), this);
 	}
-	void buffer_init(v4l_buffer &buf, unsigned index) const
+	void buffer_init(v4l_buffer &buf, unsigned index, bool extapi = false) const
 	{
-		v4l_queue_buffer_init(this, &buf, index);
+		v4l_queue_buffer_init(this, &buf, index, extapi);
 	}
 	void buffer_update(v4l_buffer &buf, unsigned index) const
 	{
@@ -833,13 +843,13 @@ public:
 
 class cv4l_buffer : public v4l_buffer {
 public:
-	cv4l_buffer(unsigned type = 0, unsigned memory = 0, unsigned index = 0)
+	cv4l_buffer(unsigned type = 0, unsigned memory = 0, unsigned index = 0, bool extapi = false)
 	{
-		init(type, memory, index);
+		init(type, memory, index, extapi);
 	}
-	cv4l_buffer(const cv4l_queue &q, unsigned index = 0)
+	cv4l_buffer(const cv4l_queue &q, unsigned index = 0, bool extapi = false)
 	{
-		init(q, index);
+		init(q, index, extapi);
 	}
 	cv4l_buffer(const cv4l_buffer &b)
 	{
@@ -847,13 +857,13 @@ public:
 	}
 	virtual ~cv4l_buffer() {}
 
-	void init(unsigned type = 0, unsigned memory = 0, unsigned index = 0)
+	void init(unsigned type = 0, unsigned memory = 0, unsigned index = 0, bool extapi = false)
 	{
-		v4l_buffer_init(this, type, memory, index);
+		v4l_buffer_init(this, type, memory, index, extapi);
 	}
-	void init(const cv4l_queue &q, unsigned index = 0)
+	void init(const cv4l_queue &q, unsigned index = 0, bool extapi = false)
 	{
-		q.buffer_init(*this, index);
+		q.buffer_init(*this, index, extapi);
 	}
 	void init(const cv4l_buffer &b)
 	{
@@ -884,6 +894,8 @@ public:
 	void s_userptr(void *userptr, unsigned plane = 0) { v4l_buffer_s_userptr(this, plane, userptr); }
 	int g_fd(unsigned plane = 0) const { return v4l_buffer_g_fd(this, plane); }
 	void s_fd(int fd, unsigned plane = 0) { v4l_buffer_s_fd(this, plane, fd); }
+	void g_dmabuf(struct v4l_dmabuf& dbuf, unsigned plane = 0) const { v4l_buffer_g_dmabuf(this, plane, &dbuf); }
+	void s_dmabuf(const struct v4l_dmabuf& dbuf, unsigned plane = 0) { v4l_buffer_s_dmabuf(this, plane, &dbuf); }
 	__u32 g_bytesused(unsigned plane = 0) const { return v4l_buffer_g_bytesused(this, plane); }
 	void s_bytesused(__u32 bytesused, unsigned plane = 0) { v4l_buffer_s_bytesused(this, plane, bytesused); }
 	__u32 g_data_offset(unsigned plane = 0) const { return v4l_buffer_g_data_offset(this, plane); }

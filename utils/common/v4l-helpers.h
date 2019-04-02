@@ -1489,21 +1489,39 @@ static inline int v4l_s_ext_fmt(struct v4l_fd *f, struct v4l2_ext_format *fmt, b
 	return v4l_ioctl(f, VIDIOC_S_EXT_FMT, fmt);
 }
 
+struct v4l_dmabuf {
+	int fd;
+	__u32 offset;
+};
+
 struct v4l_buffer {
+	bool isextbuf;
 	struct v4l2_plane planes[VIDEO_MAX_PLANES];
-	struct v4l2_buffer buf;
+	union {
+		struct v4l2_buffer buf;
+		struct v4l2_ext_buffer extbuf;
+	};
+	struct timeval exttv;
 };
 
 static inline void v4l_buffer_init(struct v4l_buffer *buf,
-		unsigned type, unsigned memory, unsigned index)
+		unsigned type, unsigned memory, unsigned index, bool isextbuf)
 {
 	memset(buf, 0, sizeof(*buf));
-	buf->buf.type = type;
-	buf->buf.memory = memory;
-	buf->buf.index = index;
-	if (V4L2_TYPE_IS_MULTIPLANAR(type)) {
-		buf->buf.m.planes = buf->planes;
-		buf->buf.length = VIDEO_MAX_PLANES;
+	buf->isextbuf = isextbuf;
+	if (!isextbuf) {
+		buf->buf.type = type;
+		buf->buf.memory = memory;
+		buf->buf.index = index;
+		if (V4L2_TYPE_IS_MULTIPLANAR(type)) {
+			buf->buf.m.planes = buf->planes;
+			buf->buf.length = VIDEO_MAX_PLANES;
+		}
+	} else {
+		buf->extbuf.type = type;
+		buf->extbuf.memory = memory;
+		buf->extbuf.index = index;
+		buf->extbuf.num_planes = VIDEO_MAX_PLANES;
 	}
 }
 
@@ -1583,6 +1601,8 @@ static inline unsigned v4l_type_invert(unsigned type)
 
 static inline unsigned v4l_buffer_g_num_planes(const struct v4l_buffer *buf)
 {
+	if (buf->isextbuf)
+		return buf->extbuf.num_planes;
 	if (v4l_type_is_planar(buf->buf.type))
 		return buf->buf.length;
 	return 1;
@@ -1590,79 +1610,112 @@ static inline unsigned v4l_buffer_g_num_planes(const struct v4l_buffer *buf)
 
 static inline __u32 v4l_buffer_g_index(const struct v4l_buffer *buf)
 {
-	return buf->buf.index;
+	return buf->isextbuf ? buf->extbuf.index : buf->buf.index;
 }
 
 static inline void v4l_buffer_s_index(struct v4l_buffer *buf, __u32 index)
 {
-	buf->buf.index = index;
+	if (buf->isextbuf)
+		buf->buf.index = index;
+	else
+		buf->extbuf.index = index;
 }
 
 static inline __s32 v4l_buffer_g_request_fd(const struct v4l_buffer *buf)
 {
-	return buf->buf.request_fd;
+	return buf->isextbuf ? buf->extbuf.request_fd : buf->buf.request_fd;
 }
 
 static inline void v4l_buffer_s_request_fd(struct v4l_buffer *buf, __s32 request_fd)
 {
-	buf->buf.request_fd = request_fd;
+	if (buf->isextbuf)
+		buf->extbuf.request_fd = request_fd;
+	else
+		buf->buf.request_fd = request_fd;
 }
 
 
 static inline unsigned v4l_buffer_g_type(const struct v4l_buffer *buf)
 {
-	return buf->buf.type;
+	return buf->isextbuf ? buf->extbuf.type : buf->buf.type;
 }
 
 static inline unsigned v4l_buffer_g_memory(const struct v4l_buffer *buf)
 {
-	return buf->buf.memory;
+	return buf->isextbuf ? buf->extbuf.memory : buf->buf.memory;
 }
 
 static inline __u32 v4l_buffer_g_flags(const struct v4l_buffer *buf)
 {
-	return buf->buf.flags;
+	return buf->isextbuf ? buf->extbuf.flags : buf->buf.flags;
 }
 
 static inline void v4l_buffer_s_flags(struct v4l_buffer *buf, __u32 flags)
 {
-	buf->buf.flags = flags;
+	__u32 *f = buf->isextbuf ? &buf->extbuf.flags : &buf->buf.flags;
+
+	*f = flags;
 }
 
 static inline void v4l_buffer_or_flags(struct v4l_buffer *buf, __u32 flags)
 {
-	buf->buf.flags |= flags;
+	__u32 *f = buf->isextbuf ? &buf->extbuf.flags : &buf->buf.flags;
+
+	*f |= flags;
 }
 
 static inline unsigned v4l_buffer_g_field(const struct v4l_buffer *buf)
 {
-	return buf->buf.field;
+	return buf->isextbuf ? buf->extbuf.field : buf->buf.field;
 }
 
 static inline void v4l_buffer_s_field(struct v4l_buffer *buf, unsigned field)
 {
-	buf->buf.field = field;
+	if (buf->isextbuf)
+		buf->extbuf.field = field;
+	else
+		buf->buf.field = field;
 }
 
 static inline __u32 v4l_buffer_g_sequence(const struct v4l_buffer *buf)
 {
+	if (buf->isextbuf)
+		return buf->extbuf.sequence;
 	return buf->buf.sequence;
 }
 
 static inline const struct timeval *v4l_buffer_g_timestamp(const struct v4l_buffer *buf)
 {
+	if (buf->isextbuf) {
+		struct timeval *tv = (struct timeval *)&buf->exttv;
+		tv->tv_sec = buf->extbuf.timestamp / 1000000000;
+		tv->tv_usec = buf->extbuf.timestamp / 1000;
+		return tv;
+	}
+
 	return &buf->buf.timestamp;
 }
 
 static inline void v4l_buffer_s_timestamp(struct v4l_buffer *buf, const struct timeval *tv)
 {
-	buf->buf.timestamp = *tv;
+	if (buf->isextbuf) {
+		buf->extbuf.timestamp = v4l2_timeval_to_ns(tv);
+		buf->exttv = *tv;
+	} else {
+		buf->buf.timestamp = *tv;
+	}
 }
 
 static inline void v4l_buffer_s_timestamp_ts(struct v4l_buffer *buf, const struct timespec *ts)
 {
-	buf->buf.timestamp.tv_sec = ts->tv_sec;
-	buf->buf.timestamp.tv_usec = ts->tv_nsec / 1000;
+	if (buf->isextbuf) {
+		buf->exttv.tv_sec = ts->tv_sec;
+		buf->exttv.tv_usec = ts->tv_nsec / 1000;
+		buf->extbuf.timestamp = v4l2_timeval_to_ns(&buf->exttv);
+	} else {
+		buf->buf.timestamp.tv_sec = ts->tv_sec;
+		buf->buf.timestamp.tv_usec = ts->tv_nsec / 1000;
+	}
 }
 
 static inline void v4l_buffer_s_timestamp_clock(struct v4l_buffer *buf)
@@ -1675,17 +1728,23 @@ static inline void v4l_buffer_s_timestamp_clock(struct v4l_buffer *buf)
 
 static inline const struct v4l2_timecode *v4l_buffer_g_timecode(const struct v4l_buffer *buf)
 {
-	return &buf->buf.timecode;
+	if (!buf->isextbuf)
+		return &buf->buf.timecode;
+
+	return NULL;
 }
 
 static inline void v4l_buffer_s_timecode(struct v4l_buffer *buf, const struct v4l2_timecode *tc)
 {
-	buf->buf.timecode = *tc;
+	if (!buf->isextbuf)
+		buf->buf.timecode = *tc;
 }
 
 static inline __u32 v4l_buffer_g_timestamp_type(const struct v4l_buffer *buf)
 {
-	return buf->buf.flags & V4L2_BUF_FLAG_TIMESTAMP_MASK;
+	const __u32 *flags = buf->isextbuf ? &buf->extbuf.flags : &buf->buf.flags;
+
+	return *flags & V4L2_BUF_FLAG_TIMESTAMP_MASK;
 }
 
 static inline bool v4l_buffer_is_copy(const struct v4l_buffer *buf)
@@ -1695,17 +1754,23 @@ static inline bool v4l_buffer_is_copy(const struct v4l_buffer *buf)
 
 static inline __u32 v4l_buffer_g_timestamp_src(const struct v4l_buffer *buf)
 {
-	return buf->buf.flags & V4L2_BUF_FLAG_TSTAMP_SRC_MASK;
+	const __u32 *flags = buf->isextbuf ? &buf->extbuf.flags : &buf->buf.flags;
+
+	return *flags & V4L2_BUF_FLAG_TSTAMP_SRC_MASK;
 }
 
 static inline void v4l_buffer_s_timestamp_src(struct v4l_buffer *buf, __u32 src)
 {
-	buf->buf.flags &= ~V4L2_BUF_FLAG_TSTAMP_SRC_MASK;
-	buf->buf.flags |= src & V4L2_BUF_FLAG_TSTAMP_SRC_MASK;
+	__u32 *flags = buf->isextbuf ? &buf->extbuf.flags : &buf->buf.flags;
+
+	*flags &= ~V4L2_BUF_FLAG_TSTAMP_SRC_MASK;
+	*flags |= src & V4L2_BUF_FLAG_TSTAMP_SRC_MASK;
 }
 
 static inline unsigned v4l_buffer_g_length(const struct v4l_buffer *buf, unsigned plane)
 {
+	if (buf->isextbuf)
+		return buf->extbuf.planes[plane].length;
 	if (v4l_type_is_planar(buf->buf.type))
 		return buf->planes[plane].length;
 	return plane ? 0 : buf->buf.length;
@@ -1713,6 +1778,8 @@ static inline unsigned v4l_buffer_g_length(const struct v4l_buffer *buf, unsigne
 
 static inline void v4l_buffer_s_length(struct v4l_buffer *buf, unsigned plane, unsigned length)
 {
+	if (buf->isextbuf)
+		buf->extbuf.planes[plane].length = length;
 	if (v4l_type_is_planar(buf->buf.type))
 		buf->planes[plane].length = length;
 	else if (plane == 0)
@@ -1721,6 +1788,8 @@ static inline void v4l_buffer_s_length(struct v4l_buffer *buf, unsigned plane, u
 
 static inline unsigned v4l_buffer_g_bytesused(const struct v4l_buffer *buf, unsigned plane)
 {
+	if (buf->isextbuf)
+		return buf->extbuf.planes[plane].bytesused;
 	if (v4l_type_is_planar(buf->buf.type))
 		return buf->planes[plane].bytesused;
 	return plane ? 0 : buf->buf.bytesused;
@@ -1728,6 +1797,8 @@ static inline unsigned v4l_buffer_g_bytesused(const struct v4l_buffer *buf, unsi
 
 static inline void v4l_buffer_s_bytesused(struct v4l_buffer *buf, unsigned plane, __u32 bytesused)
 {
+	if (buf->isextbuf)
+		buf->extbuf.planes[plane].bytesused = bytesused;
 	if (v4l_type_is_planar(buf->buf.type))
 		buf->planes[plane].bytesused = bytesused;
 	else if (plane == 0)
@@ -1736,6 +1807,8 @@ static inline void v4l_buffer_s_bytesused(struct v4l_buffer *buf, unsigned plane
 
 static inline unsigned v4l_buffer_g_data_offset(const struct v4l_buffer *buf, unsigned plane)
 {
+	if (buf->isextbuf)
+		return buf->extbuf.planes[plane].data_offset;
 	if (v4l_type_is_planar(buf->buf.type))
 		return buf->planes[plane].data_offset;
 	return 0;
@@ -1743,12 +1816,16 @@ static inline unsigned v4l_buffer_g_data_offset(const struct v4l_buffer *buf, un
 
 static inline void v4l_buffer_s_data_offset(struct v4l_buffer *buf, unsigned plane, __u32 data_offset)
 {
+	if (buf->isextbuf)
+		buf->extbuf.planes[plane].data_offset = data_offset;
 	if (v4l_type_is_planar(buf->buf.type))
 		buf->planes[plane].data_offset = data_offset;
 }
 
 static inline __u32 v4l_buffer_g_mem_offset(const struct v4l_buffer *buf, unsigned plane)
 {
+	if (buf->isextbuf)
+		return buf->extbuf.planes[plane].m.mem_offset;
 	if (v4l_type_is_planar(buf->buf.type))
 		return buf->planes[plane].m.mem_offset;
 	return plane ? 0 : buf->buf.m.offset;
@@ -1756,6 +1833,8 @@ static inline __u32 v4l_buffer_g_mem_offset(const struct v4l_buffer *buf, unsign
 
 static inline void v4l_buffer_s_userptr(struct v4l_buffer *buf, unsigned plane, void *userptr)
 {
+	if (buf->isextbuf)
+		buf->extbuf.planes[plane].m.userptr = (uint64_t)userptr;
 	if (v4l_type_is_planar(buf->buf.type))
 		buf->planes[plane].m.userptr = (unsigned long)userptr;
 	else if (plane == 0)
@@ -1764,44 +1843,91 @@ static inline void v4l_buffer_s_userptr(struct v4l_buffer *buf, unsigned plane, 
 
 static inline void *v4l_buffer_g_userptr(const struct v4l_buffer *buf, unsigned plane)
 {
+	if (buf->isextbuf)
+		return (void *)buf->extbuf.planes[plane].m.userptr;
 	if (v4l_type_is_planar(buf->buf.type))
 		return (void *)buf->planes[plane].m.userptr;
 	return plane ? NULL : (void *)buf->buf.m.userptr;
 }
 
+static inline void v4l_buffer_s_dmabuf(struct v4l_buffer *buf, unsigned plane,
+				       const struct v4l_dmabuf *dmabuf)
+{
+	if (buf->isextbuf) {
+		buf->extbuf.planes[plane].m.dmabuf.fd = dmabuf->fd;
+		buf->extbuf.planes[plane].m.dmabuf.offset = dmabuf->offset;
+	} if (v4l_type_is_planar(buf->buf.type)) {
+		buf->planes[plane].m.fd = dmabuf->fd;
+	} else if (plane == 0) {
+		buf->buf.m.fd = dmabuf->fd;
+	}
+}
+
 static inline void v4l_buffer_s_fd(struct v4l_buffer *buf, unsigned plane, int fd)
 {
+	struct v4l_dmabuf dmabuf = { .fd = fd };
+
+	v4l_buffer_s_dmabuf(buf, plane, &dmabuf);
+}
+
+static inline int v4l_buffer_g_dmabuf(const struct v4l_buffer *buf, unsigned plane,
+				      struct v4l_dmabuf *dmabuf)
+{
+	if (buf->isextbuf) {
+		dmabuf->offset = buf->extbuf.planes[plane].m.dmabuf.offset;
+		dmabuf->fd = buf->extbuf.planes[plane].m.dmabuf.fd;
+		return 0;
+	}
+
+	dmabuf->offset = 0;
 	if (v4l_type_is_planar(buf->buf.type))
-		buf->planes[plane].m.fd = fd;
-	else if (plane == 0)
-		buf->buf.m.fd = fd;
+		dmabuf->fd =  buf->planes[plane].m.fd;
+	else if (!plane)
+		dmabuf->fd =  buf->buf.m.fd;
+	else
+		return -1;
+
+	return 0;
 }
 
 static inline int v4l_buffer_g_fd(const struct v4l_buffer *buf, unsigned plane)
 {
-	if (v4l_type_is_planar(buf->buf.type))
-		return buf->planes[plane].m.fd;
-	return plane ? -1 : buf->buf.m.fd;
+	struct v4l_dmabuf dmabuf;
+	int ret;
+
+	ret = v4l_buffer_g_dmabuf(buf, plane, &dmabuf);
+	if (ret)
+		return ret;
+
+	return dmabuf.fd;
 }
 
 static inline int v4l_buffer_prepare_buf(struct v4l_fd *f, struct v4l_buffer *buf)
 {
+	if (buf->isextbuf)
+		return v4l_ioctl(f, VIDIOC_EXT_PREPARE_BUF, &buf->extbuf);
 	return v4l_ioctl(f, VIDIOC_PREPARE_BUF, &buf->buf);
 }
 
 static inline int v4l_buffer_qbuf(struct v4l_fd *f, struct v4l_buffer *buf)
 {
+	if (buf->isextbuf)
+		return v4l_ioctl(f, VIDIOC_EXT_QBUF, &buf->extbuf);
 	return v4l_ioctl(f, VIDIOC_QBUF, &buf->buf);
 }
 
 static inline int v4l_buffer_dqbuf(struct v4l_fd *f, struct v4l_buffer *buf)
 {
+	if (buf->isextbuf)
+		return v4l_ioctl(f, VIDIOC_EXT_DQBUF, &buf->extbuf);
 	return v4l_ioctl(f, VIDIOC_DQBUF, &buf->buf);
 }
 
 static inline int v4l_buffer_querybuf(struct v4l_fd *f, struct v4l_buffer *buf, unsigned index)
 {
 	v4l_buffer_s_index(buf, index);
+	if (buf->isextbuf)
+		return v4l_ioctl(f, VIDIOC_EXT_QUERYBUF, &buf->extbuf);
 	return v4l_ioctl(f, VIDIOC_QUERYBUF, &buf->buf);
 }
 
@@ -1816,7 +1942,8 @@ struct v4l_queue {
 	__u32 mem_offsets[VIDEO_MAX_FRAME][VIDEO_MAX_PLANES];
 	void *mmappings[VIDEO_MAX_FRAME][VIDEO_MAX_PLANES];
 	unsigned long userptrs[VIDEO_MAX_FRAME][VIDEO_MAX_PLANES];
-	int fds[VIDEO_MAX_FRAME][VIDEO_MAX_PLANES];
+	struct v4l_dmabuf dmabufs[VIDEO_MAX_FRAME][VIDEO_MAX_PLANES];
+	unsigned long start_offsets[VIDEO_MAX_FRAME][VIDEO_MAX_PLANES];
 };
 
 static inline void v4l_queue_init(struct v4l_queue *q,
@@ -1829,7 +1956,7 @@ static inline void v4l_queue_init(struct v4l_queue *q,
 	q->memory = memory;
 	for (i = 0; i < VIDEO_MAX_FRAME; i++)
 		for (p = 0; p < VIDEO_MAX_PLANES; p++)
-			q->fds[i][p] = -1;
+			q->dmabufs[i][p].fd = -1;
 }
 
 static inline unsigned v4l_queue_g_type(const struct v4l_queue *q) { return q->type; }
@@ -1874,12 +2001,35 @@ static inline void *v4l_queue_g_userptr(const struct v4l_queue *q, unsigned inde
 
 static inline void v4l_queue_s_fd(struct v4l_queue *q, unsigned index, unsigned plane, int fd)
 {
-	q->fds[index][plane] = fd;
+	q->dmabufs[index][plane].fd = fd;
 }
 
 static inline int v4l_queue_g_fd(const struct v4l_queue *q, unsigned index, unsigned plane)
 {
-	return q->fds[index][plane];
+	return q->dmabufs[index][plane].fd;
+}
+
+static inline void v4l_queue_s_dmabuf(struct v4l_queue *q, unsigned index, unsigned plane,
+				      const struct v4l_dmabuf *dmabuf)
+{
+	q->dmabufs[index][plane] = *dmabuf;
+}
+
+static inline void v4l_queue_g_dmabuf(const struct v4l_queue *q, unsigned index, unsigned plane,
+				      struct v4l_dmabuf *dmabuf)
+{
+	*dmabuf = q->dmabufs[index][plane];
+}
+
+static inline void v4l_queue_s_startoffs(struct v4l_queue *q, unsigned index, unsigned plane,
+					 unsigned long offs)
+{
+	q->start_offsets[index][plane] = offs;
+}
+
+static inline unsigned long v4l_queue_g_startoffs(const struct v4l_queue *q, unsigned index, unsigned plane)
+{
+	return q->start_offsets[index][plane];
 }
 
 static inline void *v4l_queue_g_dataptr(const struct v4l_queue *q, unsigned index, unsigned plane)
@@ -1889,7 +2039,7 @@ static inline void *v4l_queue_g_dataptr(const struct v4l_queue *q, unsigned inde
 	return v4l_queue_g_mmapping(q, index, plane);
 }
 
-static inline int v4l_queue_querybufs(struct v4l_fd *f, struct v4l_queue *q, unsigned from)
+static inline int v4l_queue_querybufs(struct v4l_fd *f, struct v4l_queue *q, unsigned from, bool extbuf)
 {
 	unsigned b, p;
 	int ret;
@@ -1897,8 +2047,11 @@ static inline int v4l_queue_querybufs(struct v4l_fd *f, struct v4l_queue *q, uns
 	for (b = from; b < v4l_queue_g_buffers(q); b++) {
 		struct v4l_buffer buf;
 
-		v4l_buffer_init(&buf, v4l_queue_g_type(q), v4l_queue_g_memory(q), b);
-		ret = v4l_ioctl(f, VIDIOC_QUERYBUF, &buf.buf);
+		v4l_buffer_init(&buf, v4l_queue_g_type(q), v4l_queue_g_memory(q), b, extbuf);
+		if (extbuf)
+			ret = v4l_ioctl(f, VIDIOC_EXT_QUERYBUF, &buf.extbuf);
+		else
+			ret = v4l_ioctl(f, VIDIOC_QUERYBUF, &buf.buf);
 		if (ret)
 			return ret;
 		if (b == 0) {
@@ -1932,7 +2085,7 @@ static inline int v4l_queue_reqbufs(struct v4l_fd *f,
 		return ret;
 	q->buffers = reqbufs.count;
 	q->capabilities = reqbufs.capabilities;
-	return v4l_queue_querybufs(f, q, 0);
+	return v4l_queue_querybufs(f, q, 0, false);
 }
 
 static inline bool v4l_queue_has_create_bufs(struct v4l_fd *f, const struct v4l_queue *q)
@@ -1943,6 +2096,16 @@ static inline bool v4l_queue_has_create_bufs(struct v4l_fd *f, const struct v4l_
 	createbufs.format.type = q->type;
 	createbufs.memory = q->memory;
 	return v4l_ioctl(f, VIDIOC_CREATE_BUFS, &createbufs) == 0;
+}
+
+static inline bool v4l_queue_has_ext_create_bufs(struct v4l_fd *f, const struct v4l_queue *q)
+{
+	struct v4l2_ext_create_buffers createbufs;
+
+	memset(&createbufs, 0, sizeof(createbufs));
+	createbufs.format.type = q->type;
+	createbufs.memory = q->memory;
+	return v4l_ioctl(f, VIDIOC_EXT_CREATE_BUFS, &createbufs) == 0;
 }
 
 static inline int v4l_queue_create_bufs(struct v4l_fd *f,
@@ -1967,7 +2130,32 @@ static inline int v4l_queue_create_bufs(struct v4l_fd *f,
 		return ret;
 	q->capabilities = createbufs.capabilities;
 	q->buffers += createbufs.count;
-	return v4l_queue_querybufs(f, q, q->buffers - createbufs.count);
+	return v4l_queue_querybufs(f, q, q->buffers - createbufs.count, false);
+}
+
+static inline int v4l_queue_ext_create_bufs(struct v4l_fd *f, struct v4l_queue *q,
+					    unsigned count,
+					    const struct v4l2_ext_format *fmt)
+{
+	struct v4l2_ext_create_buffers createbufs;
+	int ret;
+
+	createbufs.format.type = q->type;
+	createbufs.memory = q->memory;
+	createbufs.count = count;
+	if (fmt) {
+		createbufs.format = *fmt;
+	} else {
+		ret = v4l_g_ext_fmt(f, &createbufs.format, q->type);
+		if (ret)
+			return ret;
+	}
+	ret = v4l_ioctl(f, VIDIOC_EXT_CREATE_BUFS, &createbufs);
+	if (ret)
+		return ret;
+	q->capabilities = createbufs.capabilities;
+	q->buffers += createbufs.count;
+	return v4l_queue_querybufs(f, q, q->buffers - createbufs.count, true);
 }
 
 static inline int v4l_queue_mmap_bufs(struct v4l_fd *f,
@@ -2094,11 +2282,39 @@ static inline int v4l_queue_export_bufs(struct v4l_fd *f, struct v4l_queue *q,
 	for (b = 0; b < v4l_queue_g_buffers(q); b++) {
 		expbuf.index = b;
 		for (p = 0; p < v4l_queue_g_num_planes(q); p++) {
+			struct v4l_dmabuf dmabuf = {};
+
 			expbuf.plane = p;
 			ret = v4l_ioctl(f, VIDIOC_EXPBUF, &expbuf);
 			if (ret)
 				return ret;
-			v4l_queue_s_fd(q, b, p, expbuf.fd);
+			dmabuf.fd = expbuf.fd;
+			v4l_queue_s_dmabuf(q, b, p, &dmabuf);
+		}
+	}
+	return 0;
+}
+
+static inline int v4l_queue_ext_export_bufs(struct v4l_fd *f, struct v4l_queue *q,
+					    unsigned exp_type)
+{
+	struct v4l2_ext_exportbuffer expbuf = { };
+	unsigned b, p;
+	int ret = 0;
+
+	expbuf.type = exp_type ? : f->type;
+	expbuf.flags = O_RDWR;
+	for (b = 0; b < v4l_queue_g_buffers(q); b++) {
+		expbuf.index = b;
+		expbuf.num_planes = v4l_queue_g_num_planes(q);
+		expbuf.first_plane = 0;
+		ret = v4l_ioctl(f, VIDIOC_EXT_EXPBUF, &expbuf);
+		if (ret)
+			return ret;
+
+		for (p = 0; p < v4l_queue_g_num_planes(q); p++) {
+			struct v4l_dmabuf dmabuf = { .fd = expbuf.fds[p] };
+			v4l_queue_s_dmabuf(q, b, p, &dmabuf);
 		}
 	}
 	return 0;
@@ -2135,8 +2351,10 @@ static inline void v4l_queue_buffer_update(const struct v4l_queue *q,
 					   struct v4l_buffer *buf, unsigned index)
 {
 	unsigned p;
-		
-	if (v4l_type_is_planar(q->type)) {
+
+	if (buf->isextbuf) {
+		buf->extbuf.num_planes = v4l_queue_g_num_planes(q);
+	} else if (v4l_type_is_planar(q->type)) {
 		buf->buf.length = v4l_queue_g_num_planes(q);
 		buf->buf.m.planes = buf->planes;
 	}
@@ -2148,17 +2366,21 @@ static inline void v4l_queue_buffer_update(const struct v4l_queue *q,
 		}
 		break;
 	case V4L2_MEMORY_DMABUF:
-		for (p = 0; p < v4l_queue_g_num_planes(q); p++)
-			v4l_buffer_s_fd(buf, p, v4l_queue_g_fd(q, index, p));
+		for (p = 0; p < v4l_queue_g_num_planes(q); p++) {
+			struct v4l_dmabuf dmabuf;
+
+			v4l_queue_g_dmabuf(q, index, p, &dmabuf);
+			v4l_buffer_s_dmabuf(buf, p, &dmabuf);
+		}
 		break;
 	default:
 		break;
 	}
 }
 
-static inline void v4l_queue_buffer_init(const struct v4l_queue *q, struct v4l_buffer *buf, unsigned index)
+static inline void v4l_queue_buffer_init(const struct v4l_queue *q, struct v4l_buffer *buf, unsigned index, bool extapi)
 {
-	v4l_buffer_init(buf, v4l_queue_g_type(q), v4l_queue_g_memory(q), index);
+	v4l_buffer_init(buf, v4l_queue_g_type(q), v4l_queue_g_memory(q), index, extapi);
 	v4l_queue_buffer_update(q, buf, index);
 }
 

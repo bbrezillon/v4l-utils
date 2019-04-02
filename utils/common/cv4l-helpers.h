@@ -136,14 +136,29 @@ public:
 		return v4l_g_fmt(this, &fmt, type);
 	}
 
+	int g_ext_fmt(v4l2_ext_format &fmt, unsigned type = 0)
+	{
+		return v4l_g_ext_fmt(this, &fmt, type);
+	}
+
 	int try_fmt(v4l2_format &fmt, bool zero_bpl = true)
 	{
 		return v4l_try_fmt(this, &fmt, zero_bpl);
 	}
 
+	int try_ext_fmt(v4l2_ext_format &fmt, bool zero_bpl = true)
+	{
+		return v4l_try_ext_fmt(this, &fmt, zero_bpl);
+	}
+
 	int s_fmt(v4l2_format &fmt, bool zero_bpl = true)
 	{
 		return v4l_s_fmt(this, &fmt, zero_bpl);
+	}
+
+	int s_ext_fmt(v4l2_ext_format &fmt, bool zero_bpl = true)
+	{
+		return v4l_s_ext_fmt(this, &fmt, zero_bpl);
 	}
 
 	int g_selection(v4l2_selection &sel)

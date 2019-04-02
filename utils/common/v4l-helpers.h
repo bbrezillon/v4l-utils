@@ -590,6 +590,12 @@ static inline void v4l_format_init(struct v4l2_format *fmt, unsigned type)
 		fmt->fmt.pix.priv = V4L2_PIX_FMT_PRIV_MAGIC;
 }
 
+static inline void v4l_ext_format_init(struct v4l2_ext_format *fmt, unsigned type)
+{
+	memset(fmt, 0, sizeof(*fmt));
+	fmt->type = type;
+}
+
 static inline void v4l_format_s_width(struct v4l2_format *fmt, __u32 width)
 {
 	switch (fmt->type) {
@@ -608,6 +614,16 @@ static inline void v4l_format_s_width(struct v4l2_format *fmt, __u32 width)
 	}
 }
 
+static inline void v4l_ext_format_s_width(struct v4l2_ext_format *fmt, __u32 width)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fmt->fmt.pix.width = width;
+		break;
+	}
+}
+
 static inline __u32 v4l_format_g_width(const struct v4l2_format *fmt)
 {
 	switch (fmt->type) {
@@ -620,6 +636,17 @@ static inline __u32 v4l_format_g_width(const struct v4l2_format *fmt)
 	case V4L2_BUF_TYPE_VIDEO_OVERLAY:
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_OVERLAY:
 		return fmt->fmt.win.w.width;
+	default:
+		return 0;
+	}
+}
+
+static inline __u32 v4l_ext_format_g_width(const struct v4l2_ext_format *fmt)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return fmt->fmt.pix.width;
 	default:
 		return 0;
 	}
@@ -643,6 +670,16 @@ static inline void v4l_format_s_height(struct v4l2_format *fmt, __u32 height)
 	}
 }
 
+static inline void v4l_ext_format_s_height(struct v4l2_ext_format *fmt, __u32 height)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fmt->fmt.pix.height = height;
+		break;
+	}
+}
+
 static inline __u32 v4l_format_g_height(const struct v4l2_format *fmt)
 {
 	switch (fmt->type) {
@@ -660,6 +697,17 @@ static inline __u32 v4l_format_g_height(const struct v4l2_format *fmt)
 	}
 }
 
+static inline __u32 v4l_ext_format_g_height(const struct v4l2_ext_format *fmt)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return fmt->fmt.pix.height;
+	default:
+		return 0;
+	}
+}
+
 static inline void v4l_format_s_pixelformat(struct v4l2_format *fmt, __u32 pixelformat)
 {
 	switch (fmt->type) {
@@ -670,6 +718,28 @@ static inline void v4l_format_s_pixelformat(struct v4l2_format *fmt, __u32 pixel
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		fmt->fmt.pix_mp.pixelformat = pixelformat;
+		break;
+	case V4L2_BUF_TYPE_SDR_CAPTURE:
+	case V4L2_BUF_TYPE_SDR_OUTPUT:
+		fmt->fmt.sdr.pixelformat = pixelformat;
+		break;
+	case V4L2_BUF_TYPE_VBI_CAPTURE:
+	case V4L2_BUF_TYPE_VBI_OUTPUT:
+		fmt->fmt.vbi.sample_format = pixelformat;
+		break;
+	case V4L2_BUF_TYPE_META_CAPTURE:
+	case V4L2_BUF_TYPE_META_OUTPUT:
+		fmt->fmt.meta.dataformat = pixelformat;
+		break;
+	}
+}
+
+static inline void v4l_ext_format_s_pixelformat(struct v4l2_ext_format *fmt, __u32 pixelformat)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fmt->fmt.pix.pixelformat = pixelformat;
 		break;
 	case V4L2_BUF_TYPE_SDR_CAPTURE:
 	case V4L2_BUF_TYPE_SDR_OUTPUT:
@@ -709,6 +779,26 @@ static inline __u32 v4l_format_g_pixelformat(const struct v4l2_format *fmt)
 	}
 }
 
+static inline __u32 v4l_ext_format_g_pixelformat(const struct v4l2_ext_format *fmt)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return fmt->fmt.pix.pixelformat;
+	case V4L2_BUF_TYPE_SDR_CAPTURE:
+	case V4L2_BUF_TYPE_SDR_OUTPUT:
+		return fmt->fmt.sdr.pixelformat;
+	case V4L2_BUF_TYPE_VBI_CAPTURE:
+	case V4L2_BUF_TYPE_VBI_OUTPUT:
+		return fmt->fmt.vbi.sample_format;
+	case V4L2_BUF_TYPE_META_CAPTURE:
+	case V4L2_BUF_TYPE_META_OUTPUT:
+		return fmt->fmt.meta.dataformat;
+	default:
+		return 0;
+	}
+}
+
 static inline void v4l_format_s_field(struct v4l2_format *fmt, unsigned field)
 {
 	switch (fmt->type) {
@@ -723,6 +813,16 @@ static inline void v4l_format_s_field(struct v4l2_format *fmt, unsigned field)
 	case V4L2_BUF_TYPE_VIDEO_OVERLAY:
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_OVERLAY:
 		fmt->fmt.win.field = field;
+		break;
+	}
+}
+
+static inline void v4l_ext_format_s_field(struct v4l2_ext_format *fmt, unsigned field)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fmt->fmt.pix.field = field;
 		break;
 	}
 }
@@ -744,10 +844,33 @@ static inline unsigned v4l_format_g_field(const struct v4l2_format *fmt)
 	}
 }
 
+static inline unsigned v4l_ext_format_g_field(const struct v4l2_ext_format *fmt)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return fmt->fmt.pix.field;
+	default:
+		return V4L2_FIELD_NONE;
+	}
+}
+
 static inline unsigned v4l_format_g_first_field(const struct v4l2_format *fmt,
 						v4l2_std_id std)
 {
 	unsigned field = v4l_format_g_field(fmt);
+
+	if (field != V4L2_FIELD_ALTERNATE)
+		return field;
+	if (std & V4L2_STD_525_60)
+		return V4L2_FIELD_BOTTOM;
+	return V4L2_FIELD_TOP;
+}
+
+static inline unsigned v4l_ext_format_g_first_field(const struct v4l2_ext_format *fmt,
+						    v4l2_std_id std)
+{
+	unsigned field = v4l_ext_format_g_field(fmt);
 
 	if (field != V4L2_FIELD_ALTERNATE)
 		return field;
@@ -766,6 +889,16 @@ static inline unsigned v4l_format_g_flds_per_frm(const struct v4l2_format *fmt)
 	return 1;
 }
 
+static inline unsigned v4l_ext_format_g_flds_per_frm(const struct v4l2_ext_format *fmt)
+{
+	unsigned field = v4l_ext_format_g_field(fmt);
+
+	if (field == V4L2_FIELD_ALTERNATE ||
+	    field == V4L2_FIELD_TOP || field == V4L2_FIELD_BOTTOM)
+		return 2;
+	return 1;
+}
+
 static inline void v4l_format_s_frame_height(struct v4l2_format *fmt, __u32 height)
 {
 	if (V4L2_FIELD_HAS_T_OR_B(v4l_format_g_field(fmt)))
@@ -773,11 +906,27 @@ static inline void v4l_format_s_frame_height(struct v4l2_format *fmt, __u32 heig
 	v4l_format_s_height(fmt, height);
 }
 
+static inline void v4l_ext_format_s_frame_height(struct v4l2_ext_format *fmt, __u32 height)
+{
+	if (V4L2_FIELD_HAS_T_OR_B(v4l_ext_format_g_field(fmt)))
+		height /= 2;
+	v4l_ext_format_s_height(fmt, height);
+}
+
 static inline __u32 v4l_format_g_frame_height(const struct v4l2_format *fmt)
 {
 	__u32 height = v4l_format_g_height(fmt);
 
 	if (V4L2_FIELD_HAS_T_OR_B(v4l_format_g_field(fmt)))
+		return height * 2;
+	return height;
+}
+
+static inline __u32 v4l_ext_format_g_frame_height(const struct v4l2_ext_format *fmt)
+{
+	__u32 height = v4l_ext_format_g_height(fmt);
+
+	if (V4L2_FIELD_HAS_T_OR_B(v4l_ext_format_g_field(fmt)))
 		return height * 2;
 	return height;
 }
@@ -797,6 +946,17 @@ static inline void v4l_format_s_colorspace(struct v4l2_format *fmt,
 	}
 }
 
+static inline void v4l_ext_format_s_colorspace(struct v4l2_ext_format *fmt,
+					       unsigned colorspace)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fmt->fmt.pix.colorspace = colorspace;
+		break;
+	}
+}
+
 static inline unsigned
 v4l_format_g_colorspace(const struct v4l2_format *fmt)
 {
@@ -807,6 +967,18 @@ v4l_format_g_colorspace(const struct v4l2_format *fmt)
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		return fmt->fmt.pix_mp.colorspace;
+	default:
+		return 0;
+	}
+}
+
+static inline unsigned
+v4l_ext_format_g_colorspace(const struct v4l2_ext_format *fmt)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return fmt->fmt.pix.colorspace;
 	default:
 		return 0;
 	}
@@ -827,6 +999,17 @@ static inline void v4l_format_s_xfer_func(struct v4l2_format *fmt,
 	}
 }
 
+static inline void v4l_ext_format_s_xfer_func(struct v4l2_ext_format *fmt,
+					      unsigned xfer_func)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fmt->fmt.pix.xfer_func = xfer_func;
+		break;
+	}
+}
+
 static inline unsigned
 v4l_format_g_xfer_func(const struct v4l2_format *fmt)
 {
@@ -842,8 +1025,20 @@ v4l_format_g_xfer_func(const struct v4l2_format *fmt)
 	}
 }
 
+static inline unsigned
+v4l_ext_format_g_xfer_func(const struct v4l2_ext_format *fmt)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return fmt->fmt.pix.xfer_func;
+	default:
+		return 0;
+	}
+}
+
 static inline void v4l_format_s_ycbcr_enc(struct v4l2_format *fmt,
-					       unsigned ycbcr_enc)
+					  unsigned ycbcr_enc)
 {
 	switch (fmt->type) {
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
@@ -853,6 +1048,17 @@ static inline void v4l_format_s_ycbcr_enc(struct v4l2_format *fmt,
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		fmt->fmt.pix_mp.ycbcr_enc = ycbcr_enc;
+		break;
+	}
+}
+
+static inline void v4l_ext_format_s_ycbcr_enc(struct v4l2_ext_format *fmt,
+					      unsigned ycbcr_enc)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fmt->fmt.pix.ycbcr_enc = ycbcr_enc;
 		break;
 	}
 }
@@ -873,9 +1079,29 @@ v4l_format_g_ycbcr_enc(const struct v4l2_format *fmt)
 }
 
 static inline unsigned
+v4l_ext_format_g_ycbcr_enc(const struct v4l2_ext_format *fmt)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return fmt->fmt.pix.ycbcr_enc;
+	default:
+		return 0;
+	}
+}
+
+static inline unsigned
 v4l_format_g_hsv_enc(const struct v4l2_format *fmt)
 {
 	unsigned hsv_enc = v4l_format_g_ycbcr_enc(fmt);
+
+	return hsv_enc < V4L2_HSV_ENC_180 ? V4L2_HSV_ENC_180 : hsv_enc;
+}
+
+static inline unsigned
+v4l_ext_format_g_hsv_enc(const struct v4l2_ext_format *fmt)
+{
+	unsigned hsv_enc = v4l_ext_format_g_ycbcr_enc(fmt);
 
 	return hsv_enc < V4L2_HSV_ENC_180 ? V4L2_HSV_ENC_180 : hsv_enc;
 }
@@ -895,6 +1121,17 @@ static inline void v4l_format_s_quantization(struct v4l2_format *fmt,
 	}
 }
 
+static inline void v4l_ext_format_s_quantization(struct v4l2_ext_format *fmt,
+						 unsigned quantization)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fmt->fmt.pix.quantization = quantization;
+		break;
+	}
+}
+
 static inline unsigned
 v4l_format_g_quantization(const struct v4l2_format *fmt)
 {
@@ -905,6 +1142,18 @@ v4l_format_g_quantization(const struct v4l2_format *fmt)
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		return fmt->fmt.pix_mp.quantization;
+	default:
+		return 0;
+	}
+}
+
+static inline unsigned
+v4l_ext_format_g_quantization(const struct v4l2_ext_format *fmt)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return fmt->fmt.pix.quantization;
 	default:
 		return 0;
 	}
@@ -925,6 +1174,17 @@ static inline void v4l_format_s_flags(struct v4l2_format *fmt,
 	}
 }
 
+static inline void v4l_ext_format_s_flags(struct v4l2_ext_format *fmt,
+					  unsigned flags)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fmt->fmt.pix.flags = flags;
+		break;
+	}
+}
+
 static inline unsigned
 v4l_format_g_flags(const struct v4l2_format *fmt)
 {
@@ -940,12 +1200,34 @@ v4l_format_g_flags(const struct v4l2_format *fmt)
 	}
 }
 
+static inline unsigned
+v4l_ext_format_g_flags(const struct v4l2_ext_format *fmt)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return fmt->fmt.pix.flags;
+	default:
+		return 0;
+	}
+}
+
 static inline void v4l_format_s_num_planes(struct v4l2_format *fmt, __u8 num_planes)
 {
 	switch (fmt->type) {
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		fmt->fmt.pix_mp.num_planes = num_planes;
+		break;
+	}
+}
+
+static inline void v4l_ext_format_s_num_planes(struct v4l2_ext_format *fmt, __u8 num_planes)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fmt->fmt.pix.num_planes = num_planes;
 		break;
 	}
 }
@@ -957,6 +1239,18 @@ v4l_format_g_num_planes(const struct v4l2_format *fmt)
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		return fmt->fmt.pix_mp.num_planes;
+	default:
+		return 1;
+	}
+}
+
+static inline __u8
+v4l_ext_format_g_num_planes(const struct v4l2_ext_format *fmt)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return fmt->fmt.pix.num_planes;
 	default:
 		return 1;
 	}
@@ -974,6 +1268,23 @@ static inline void v4l_format_s_bytesperline(struct v4l2_format *fmt,
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		fmt->fmt.pix_mp.plane_fmt[plane].bytesperline = bytesperline;
+		break;
+	case V4L2_BUF_TYPE_VBI_CAPTURE:
+	case V4L2_BUF_TYPE_VBI_OUTPUT:
+		/* This assumes V4L2_PIX_FMT_GREY which is always the case */
+		if (plane == 0)
+			fmt->fmt.vbi.samples_per_line = bytesperline;
+		break;
+	}
+}
+
+static inline void v4l_ext_format_s_bytesperline(struct v4l2_ext_format *fmt,
+						 unsigned plane, __u32 bytesperline)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fmt->fmt.pix.plane_fmt[plane].bytesperline = bytesperline;
 		break;
 	case V4L2_BUF_TYPE_VBI_CAPTURE:
 	case V4L2_BUF_TYPE_VBI_OUTPUT:
@@ -1003,6 +1314,22 @@ v4l_format_g_bytesperline(const struct v4l2_format *fmt, unsigned plane)
 	}
 }
 
+static inline __u32
+v4l_ext_format_g_bytesperline(const struct v4l2_ext_format *fmt, unsigned plane)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return fmt->fmt.pix.plane_fmt[plane].bytesperline;
+	case V4L2_BUF_TYPE_VBI_CAPTURE:
+	case V4L2_BUF_TYPE_VBI_OUTPUT:
+		/* This assumes V4L2_PIX_FMT_GREY which is always the case */
+		return plane ? 0 : fmt->fmt.vbi.samples_per_line;
+	default:
+		return 0;
+	}
+}
+
 static inline void v4l_format_s_sizeimage(struct v4l2_format *fmt,
 					  unsigned plane, __u32 sizeimage)
 {
@@ -1015,6 +1342,17 @@ static inline void v4l_format_s_sizeimage(struct v4l2_format *fmt,
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		fmt->fmt.pix_mp.plane_fmt[plane].sizeimage = sizeimage;
+		break;
+	}
+}
+
+static inline void v4l_ext_format_s_sizeimage(struct v4l2_ext_format *fmt,
+					      unsigned plane, __u32 sizeimage)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fmt->fmt.pix.plane_fmt[plane].sizeimage = sizeimage;
 		break;
 	}
 }
@@ -1048,10 +1386,42 @@ v4l_format_g_sizeimage(const struct v4l2_format *fmt, unsigned plane)
 	}
 }
 
+static inline __u32
+v4l_ext_format_g_sizeimage(const struct v4l2_ext_format *fmt, unsigned plane)
+{
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return fmt->fmt.pix.plane_fmt[plane].sizeimage;
+	case V4L2_BUF_TYPE_VBI_CAPTURE:
+	case V4L2_BUF_TYPE_VBI_OUTPUT:
+		/* This assumes V4L2_PIX_FMT_GREY which is always the case */
+		return plane ? 0 : fmt->fmt.vbi.samples_per_line *
+			(fmt->fmt.vbi.count[0] + fmt->fmt.vbi.count[1]);
+	case V4L2_BUF_TYPE_SLICED_VBI_CAPTURE:
+	case V4L2_BUF_TYPE_SLICED_VBI_OUTPUT:
+		return plane ? 0 : fmt->fmt.sliced.io_size;
+	case V4L2_BUF_TYPE_SDR_CAPTURE:
+	case V4L2_BUF_TYPE_SDR_OUTPUT:
+		return plane ? 0 : fmt->fmt.sdr.buffersize;
+	case V4L2_BUF_TYPE_META_CAPTURE:
+	case V4L2_BUF_TYPE_META_OUTPUT:
+		return plane ? 0 : fmt->fmt.meta.buffersize;
+	default:
+		return 0;
+	}
+}
+
 static inline int v4l_g_fmt(struct v4l_fd *f, struct v4l2_format *fmt, unsigned type)
 {
 	v4l_format_init(fmt, type ? type : f->type);
 	return v4l_ioctl(f, VIDIOC_G_FMT, fmt);
+}
+
+static inline int v4l_g_ext_fmt(struct v4l_fd *f, struct v4l2_ext_format *fmt, unsigned type)
+{
+	v4l_ext_format_init(fmt, type ? type : f->type);
+	return v4l_ioctl(f, VIDIOC_G_EXT_FMT, fmt);
 }
 
 static inline int v4l_try_fmt(struct v4l_fd *f, struct v4l2_format *fmt, bool zero_bpl)
@@ -1070,6 +1440,23 @@ static inline int v4l_try_fmt(struct v4l_fd *f, struct v4l2_format *fmt, bool ze
 	return v4l_ioctl(f, VIDIOC_TRY_FMT, fmt);
 }
 
+static inline int v4l_try_ext_fmt(struct v4l_fd *f, struct v4l2_ext_format *fmt, bool zero_bpl)
+{
+	/*
+	 * Some drivers allow applications to set bytesperline to a larger value.
+	 * In most cases you just want the driver to fill in the bytesperline field
+	 * and so you have to zero bytesperline first.
+	 */
+	if (zero_bpl) {
+		__u8 p;
+
+		for (p = 0; p < v4l_ext_format_g_num_planes(fmt); p++)
+			v4l_ext_format_s_bytesperline(fmt, p, 0);
+	}
+	return v4l_ioctl(f, VIDIOC_TRY_EXT_FMT, fmt);
+}
+
+
 static inline int v4l_s_fmt(struct v4l_fd *f, struct v4l2_format *fmt, bool zero_bpl)
 {
 	/*
@@ -1084,6 +1471,22 @@ static inline int v4l_s_fmt(struct v4l_fd *f, struct v4l2_format *fmt, bool zero
 			v4l_format_s_bytesperline(fmt, p, 0);
 	}
 	return v4l_ioctl(f, VIDIOC_S_FMT, fmt);
+}
+
+static inline int v4l_s_ext_fmt(struct v4l_fd *f, struct v4l2_ext_format *fmt, bool zero_bpl)
+{
+	/*
+	 * Some drivers allow applications to set bytesperline to a larger value.
+	 * In most cases you just want the driver to fill in the bytesperline field
+	 * and so you have to zero bytesperline first.
+	 */
+	if (zero_bpl) {
+		__u8 p;
+
+		for (p = 0; p < v4l_ext_format_g_num_planes(fmt); p++)
+			v4l_ext_format_s_bytesperline(fmt, p, 0);
+	}
+	return v4l_ioctl(f, VIDIOC_S_EXT_FMT, fmt);
 }
 
 struct v4l_buffer {

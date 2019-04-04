@@ -859,14 +859,17 @@ public:
 
 	void init(unsigned type = 0, unsigned memory = 0, unsigned index = 0, bool extapi = false)
 	{
+		printf("%s:%i\n", __func__, __LINE__);
 		v4l_buffer_init(this, type, memory, index, extapi);
 	}
 	void init(const cv4l_queue &q, unsigned index = 0, bool extapi = false)
 	{
+		printf("%s:%i\n", __func__, __LINE__);
 		q.buffer_init(*this, index, extapi);
 	}
 	void init(const cv4l_buffer &b)
 	{
+		printf("%s:%i\n", __func__, __LINE__);
 		memcpy((v4l2_buffer *)this, (v4l2_buffer *)&b, sizeof(b));
 		if (v4l_type_is_planar(g_type()))
 			buf.m.planes = planes;

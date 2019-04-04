@@ -36,6 +36,7 @@
 #include <netinet/in.h>
 #include <map>
 #include <vector>
+#include <linux/udmabuf.h>
 #include "v4l2-compliance.h"
 
 #define V4L2_CTRL_CLASS_VIVID		0x00f00000
@@ -833,7 +834,7 @@ static int captureBufs(struct node *node, const cv4l_queue &q,
 		V4L2_BUF_FLAG_KEYFRAME | V4L2_BUF_FLAG_PFRAME | V4L2_BUF_FLAG_BFRAME;
 	int fd_flags = fcntl(node->g_fd(), F_GETFL);
 	cv4l_fmt fmt_q;
-	buffer buf(q);
+	buffer buf(q, 0, true);
 	unsigned count = frame_count;
 	unsigned req_idx = q.g_buffers();
 	bool stopped = false;
@@ -896,7 +897,7 @@ static int captureBufs(struct node *node, const cv4l_queue &q,
 	if (pollmode)
 		fcntl(node->g_fd(), F_SETFL, fd_flags | O_NONBLOCK);
 	for (;;) {
-		buf.init(q);
+		buf.init(q, 0, true);
 
 		bool can_read = true;
 		bool have_event = false;
@@ -980,11 +981,15 @@ static int captureBufs(struct node *node, const cv4l_queue &q,
 				buf.querybuf(node, buf.g_index());
 				fail_on_test(buf.g_flags() & V4L2_BUF_FLAG_REQUEST_FD);
 				fail_on_test(buf.g_request_fd());
+				printf("%s:%i\n", __func__, __LINE__);
 				fail_on_test(!buf.qbuf(node));
+				printf("%s:%i\n", __func__, __LINE__);
 				buf.s_flags(V4L2_BUF_FLAG_REQUEST_FD);
 				buf.s_request_fd(buf_req_fds[req_idx]);
 			}
-			fail_on_test(buf.qbuf(node, q));
+			ret = buf.qbuf(node, q);
+			printf("%s:%i ret %d\n", __func__, __LINE__, ret);
+			fail_on_test(ret);
 			fail_on_test(buf.g_flags() & V4L2_BUF_FLAG_DONE);
 			if (buf.g_flags() & V4L2_BUF_FLAG_REQUEST_FD) {
 				fail_on_test(doioctl_fd(buf_req_fds[req_idx],
@@ -1010,7 +1015,7 @@ static int captureBufs(struct node *node, const cv4l_queue &q,
 		if (!node->is_m2m || !can_read)
 			continue;
 
-		buf.init(m2m_q);
+		buf.init(m2m_q, 0, true);
 		do {
 			ret = buf.dqbuf(node);
 		} while (ret == EAGAIN);
@@ -1467,13 +1472,99 @@ int testUserPtr(struct node *node, unsigned frame_count, enum poll_mode pollmode
 	return 0;
 }
 
+class dmabuf_provider {
+public:
+
+};
+
+class udmabuf: public dmabuf_provider {
+public:
+	udmabuf(): memfd(-1), devfd(-1) { }
+	~udmabuf()
+	{
+		unsigned int i;
+
+		for (i = 0; i < dmabufs.size(); i++)
+			close(dmabufs[i].fd);
+
+		close(devfd);
+		close(memfd);
+	}
+
+	int prepare_queue(cv4l_queue &q)
+	{
+		struct udmabuf_create create = { };
+		buffer buf(q, 0, true);
+		size_t size = getpagesize();
+		int ret;
+
+		for (unsigned p = 0; p < q.g_num_planes(); p++)
+			size += (q.g_length(p) + getpagesize() - 1) &
+				~(getpagesize() - 1);
+
+		dmabufs.resize(q.g_buffers());
+		for (unsigned i = 0; i < dmabufs.size(); i++)
+			dmabufs[i].fd = -1;
+
+		memfd = memfd_create("v4l-udmabuf", MFD_ALLOW_SEALING);
+		if (memfd < 0)
+			return errno;
+
+		ret = fcntl(memfd, F_ADD_SEALS, F_SEAL_SHRINK);
+		if (ret < 0)
+			return errno;
+
+		devfd = open("/dev/udmabuf", O_RDWR);
+		if (devfd < 0)
+			return errno;
+
+		ret = ftruncate(memfd, size * q.g_buffers());
+		if (ret < 0)
+			return errno;
+
+		create.memfd = (__u32)memfd;
+		create.size = size;
+		create.offset = 0;
+		for (unsigned i = 0; i < q.g_buffers(); i++) {
+			dmabufs[i].fd = ioctl(devfd, UDMABUF_CREATE, &create);
+			if (dmabufs[i].fd < 0)
+				return errno;
+			printf("%s:%i\n", __func__, __LINE__);
+			create.offset += size;
+		}
+
+		for (unsigned i = 0; i < q.g_buffers(); i++) {
+			unsigned int offs = getpagesize();
+			for (unsigned p = 0; p < q.g_num_planes(); p++) {
+				dmabufs[i].offset = offs;
+				q.s_dmabuf(i, p, dmabufs[i]);
+				offs += (q.g_length(p) + getpagesize() - 1) &
+					~(getpagesize() - 1);
+				dmabufs[i].fd = -1;
+			}
+		}
+
+		return 0;
+	}
+
+private:
+	std::vector<v4l_dmabuf> dmabufs;
+	int memfd;
+	int devfd;
+};
+
 static int setupDmaBuf(struct node *expbuf_node, struct node *node,
 		       cv4l_queue &q, cv4l_queue &exp_q)
 {
+	udmabuf udmabuf;
 	fail_on_test(exp_q.reqbufs(expbuf_node, q.g_buffers()));
 	fail_on_test(exp_q.g_buffers() < q.g_buffers());
 	fail_on_test(exp_q.export_bufs(expbuf_node, exp_q.g_type()));
 
+	fail_on_test(udmabuf.prepare_queue(q));
+	fail_on_test(q.mmap_bufs(node));
+
+	/*
 	for (unsigned i = 0; i < q.g_buffers(); i++) {
 		buffer buf(q);
 		int ret;
@@ -1493,15 +1584,20 @@ static int setupDmaBuf(struct node *expbuf_node, struct node *node,
 		ret = buf.prepare_buf(node);
 		fail_on_test(!ret);
 	}
+	*/
 	fail_on_test(q.mmap_bufs(node));
 	for (unsigned i = 0; i < q.g_buffers(); i++) {
-		buffer buf(q);
+		buffer buf(q, 0, true);
 		int ret;
 
-		buf.init(q, i);
+		buf.init(q, i, true);
 		fail_on_test(buf.querybuf(node, i));
-		for (unsigned p = 0; p < buf.g_num_planes(); p++)
-			buf.s_fd(q.g_fd(i, p), p);
+		for (unsigned p = 0; p < buf.g_num_planes(); p++) {
+			struct v4l_dmabuf dmabuf;
+
+			q.g_dmabuf(i, p, dmabuf);
+			buf.s_dmabuf(dmabuf, p);
+		}
 		ret = buf.prepare_buf(node, q);
 		if (ret != ENOTTY) {
 			fail_on_test(ret);

@@ -2371,6 +2371,8 @@ static inline void v4l_queue_buffer_update(const struct v4l_queue *q,
 
 			v4l_queue_g_dmabuf(q, index, p, &dmabuf);
 			v4l_buffer_s_dmabuf(buf, p, &dmabuf);
+//			if (v4l_queue_g_startoffs(q, index, p) != v4l_buffer_g_startoffs(buf, p))
+//				*((int *)NULL) = 1;
 		}
 		break;
 	default:
